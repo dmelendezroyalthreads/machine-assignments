@@ -5,7 +5,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from "@supaba
 import { parseOrderFile, type ImportedOrder, type ImportSourceType } from "./orderImport";
 import "./styles.css";
 
-const categories = ["P2S", "Events", "Rush/MST", "FIFO", "Special Project"] as const;
+const categories = ["P2S", "Events", "Rush/MST", "FIFO", "Special Project", "Tour Player"] as const;
 const locations = ["1st Shift", "2nd Shift", "3rd Shift"] as const;
 
 type Category = (typeof categories)[number];

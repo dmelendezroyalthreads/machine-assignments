@@ -5,7 +5,7 @@ Real-time assignment board for team leaders coordinating machine workload across
 ## First version
 
 - Add, edit, and delete machine assignments.
-- Category dropdown options: `P2S`, `Events`, `Rush/MST`, `FIFO`, `Special Project`.
+- Category dropdown options: `P2S`, `Events`, `Rush/MST`, `FIFO`, `Special Project`, `Tour Player`.
 - Category detail field is limited to 20 characters.
 - Operator name is free form.
 - Quantity is limited to 0 through 360 units.
