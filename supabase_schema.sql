@@ -94,7 +94,7 @@ create table if not exists public.machine_assignments (
     check (location in ('1st Shift', '2nd Shift', '3rd Shift')),
   machine text not null check (char_length(trim(machine)) between 1 and 40),
   category text not null
-    check (category in ('P2S', 'Events', 'Rush/MST', 'FIFO', 'Special Project', 'Tour Player')),
+    check (category in ('P2S', 'Events', 'Rush/MST', 'FIFO', 'Special Project', 'Tour Player', 'Held ZenDesk')),
   category_detail text not null default '' check (char_length(category_detail) <= 20),
   operator_name text not null default '',
   quantity integer not null default 0 check (quantity between 0 and 360),
