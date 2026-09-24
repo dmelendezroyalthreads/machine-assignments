@@ -122,7 +122,13 @@ main {
 
 .metrics-band {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.category-metrics-band {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -160,6 +166,14 @@ main {
   margin-top: 3px;
   font-size: 23px;
   line-height: 1.1;
+}
+
+.metric small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .notice {
@@ -644,7 +658,8 @@ td .units-input {
 }
 
 @media (max-width: 1040px) {
-  .metrics-band {
+  .metrics-band,
+  .category-metrics-band {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -683,6 +698,7 @@ td .units-input {
   }
 
   .metrics-band,
+  .category-metrics-band,
   .assignment-form {
     grid-template-columns: 1fr;
   }

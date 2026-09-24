@@ -307,10 +307,19 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
         .filter((assignment) => assignment.location === location)
         .reduce((sum, assignment) => sum + assignment.quantity, 0),
     }));
+    const categoryTotals = categories.map((category) => {
+      const categoryAssignments = assignments.filter((assignment) => assignment.category === category);
+      return {
+        category,
+        machines: categoryAssignments.length,
+        units: categoryAssignments.reduce((sum, assignment) => sum + assignment.quantity, 0),
+      };
+    });
     return {
       machines: assignments.length,
       units: assignments.reduce((sum, assignment) => sum + assignment.quantity, 0),
       locationTotals,
+      categoryTotals,
     };
   }, [assignments]);
 
@@ -353,6 +362,18 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
           <Metric icon={<Activity size={20} />} label="Total Units" value={totals.units.toLocaleString()} />
           {totals.locationTotals.map((item) => (
             <Metric key={item.location} icon={<Cloud size={20} />} label={item.location} value={item.units.toLocaleString()} />
+          ))}
+        </section>
+
+        <section className="category-metrics-band" aria-label="Category totals">
+          {totals.categoryTotals.map((item) => (
+            <Metric
+              key={item.category}
+              icon={<Activity size={20} />}
+              label={item.category}
+              value={`${item.units.toLocaleString()} units`}
+              subvalue={`${item.machines} ${item.machines === 1 ? "machine" : "machines"}`}
+            />
           ))}
         </section>
 
@@ -591,13 +612,24 @@ function AccessGate() {
   );
 }
 
-function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Metric({
+  icon,
+  label,
+  subvalue,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  subvalue?: string;
+  value: string;
+}) {
   return (
     <div className="metric">
       <div className="metric-icon">{icon}</div>
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
+        {subvalue && <small>{subvalue}</small>}
       </div>
     </div>
   );
