@@ -9,6 +9,15 @@ Real-time assignment board for team leaders coordinating machine workload across
 - Category detail field is limited to 20 characters.
 - Operator name is free form.
 - Quantity is limited to 0 through 360 units.
+- Import order lists from Excel, CSV, or TSV files. The app identifies supported
+  PMStats and LogistiView exports by their column headers, not their filenames.
+- Filter imported orders by source location, preview the detected pick tickets,
+  and select the orders that belong on a machine before importing.
+- Replace a machine's active list with a fresh file or merge additional orders
+  into its current list. Completed orders remain available in history.
+- Expand a machine row to review imported order details and mark individual
+  orders complete or reopen them. The machine quantity is recalculated from its
+  open imported orders.
 - Supabase Realtime updates every connected browser after inserts, edits, and deletes.
 - A database-enforced team PIN protects the live board.
 - Access lasts 12 hours per device and can be ended with the Lock button.
@@ -53,3 +62,16 @@ Use this as a static site on Render.
   - `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 The included `render.yaml` can be used for blueprint deployment.
+
+## Order import workflow
+
+1. Choose **Import orders** and select the destination machine.
+2. Choose **Replace active list** for a new authoritative list, or **Merge with
+   active list** to add orders without removing existing open orders.
+3. Select an `.xlsx`, `.xls`, `.csv`, or `.tsv` file.
+4. If the file contains multiple machine locations, choose the appropriate
+   source location. The app tries to match location suffixes to the machine
+   number automatically.
+5. Review and select the detected pick tickets, keeping the active total at or
+   below 360 units, then import.
+6. Expand the machine row to mark orders complete or reopen them.

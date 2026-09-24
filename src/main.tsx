@@ -1,7 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { Activity, Check, Cloud, KeyRound, Loader2, Lock, MonitorCog, Plus, RefreshCw, Save, ShieldCheck, Trash2, Wifi, WifiOff } from "lucide-react";
+import { Activity, Check, CheckCircle2, ChevronDown, ChevronUp, Cloud, FileSpreadsheet, KeyRound, Loader2, Lock, MonitorCog, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Trash2, Upload, Wifi, WifiOff, X } from "lucide-react";
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
+import { parseOrderFile, type ImportedOrder, type ImportSourceType } from "./orderImport";
 import "./styles.css";
 
 const categories = ["P2S", "Events", "Rush/MST", "FIFO", "Special Project"] as const;
@@ -23,6 +24,12 @@ type Assignment = {
 };
 
 type Draft = Omit<Assignment, "id" | "created_at" | "updated_at">;
+
+type MachineOrder = ImportedOrder & {
+  id: string;
+  status: "pending" | "completed" | "removed";
+  completed_at?: string | null;
+};
 
 const emptyDraft: Draft = {
   location: "1st Shift",
@@ -74,6 +81,7 @@ const configuredForSupabase = Boolean(
     !supabaseUrl.includes("your-project-ref") &&
     !supabaseKey.includes("your_key_here")
 );
+const skipAuthForLocalPreview = import.meta.env.DEV && import.meta.env.VITE_SKIP_AUTH === "true";
 
 const supabase: SupabaseClient | null = configuredForSupabase
   ? createClient(supabaseUrl!, supabaseKey!, {
@@ -286,6 +294,7 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
   } = useAssignments();
   const [draft, setDraft] = React.useState<Draft>(emptyDraft);
   const [locationFilter, setLocationFilter] = React.useState<"All" | LocationName>("All");
+  const [showImport, setShowImport] = React.useState(false);
 
   const filteredAssignments = locationFilter === "All"
     ? assignments
@@ -324,10 +333,16 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
             <span>{status}</span>
           </div>
           {supabase && (
-            <button className="lock-action" type="button" onClick={() => void onLock()} title="Lock this device">
-              <Lock size={17} />
-              <span>Lock</span>
-            </button>
+            <>
+              <button className="secondary-action" type="button" onClick={() => setShowImport(true)}>
+                <Upload size={17} />
+                <span>Import orders</span>
+              </button>
+              <button className="lock-action" type="button" onClick={() => void onLock()} title="Lock this device">
+                <Lock size={17} />
+                <span>Lock</span>
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -460,6 +475,7 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
                     key={assignment.id}
                     assignment={assignment}
                     onDelete={deleteAssignment}
+                    onOrdersChanged={loadAssignments}
                     onSave={updateAssignment}
                   />
                 ))
@@ -468,13 +484,20 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
           </table>
         </section>
       </main>
+      {showImport && (
+        <ImportOrdersDialog
+          assignments={assignments}
+          onClose={() => setShowImport(false)}
+          onImported={loadAssignments}
+        />
+      )}
     </div>
   );
 }
 
 function AccessGate() {
-  const [authorized, setAuthorized] = React.useState(!supabase);
-  const [checking, setChecking] = React.useState(Boolean(supabase));
+  const [authorized, setAuthorized] = React.useState(!supabase || skipAuthForLocalPreview);
+  const [checking, setChecking] = React.useState(Boolean(supabase) && !skipAuthForLocalPreview);
   const [pin, setPin] = React.useState("");
   const [error, setError] = React.useState("");
 
@@ -492,7 +515,7 @@ function AccessGate() {
 
   React.useEffect(() => {
     async function checkAccess() {
-      if (!supabase) return;
+      if (!supabase || skipAuthForLocalPreview) return;
       const hasSession = await ensureAnonymousSession();
       if (hasSession) {
         const { data, error: accessError } = await supabase.rpc("has_machine_assignment_access");
@@ -580,6 +603,194 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
   );
 }
 
+function ImportOrdersDialog({
+  assignments,
+  onClose,
+  onImported,
+}: {
+  assignments: Assignment[];
+  onClose: () => void;
+  onImported: () => Promise<void>;
+}) {
+  const [assignmentId, setAssignmentId] = React.useState(assignments[0]?.id || "");
+  const [fileName, setFileName] = React.useState("");
+  const [sourceType, setSourceType] = React.useState<ImportSourceType>("generic");
+  const [orders, setOrders] = React.useState<ImportedOrder[]>([]);
+  const [sourceFilter, setSourceFilter] = React.useState("All locations");
+  const [selectedOrderKeys, setSelectedOrderKeys] = React.useState<Set<string>>(new Set());
+  const [mode, setMode] = React.useState<"replace" | "merge">("replace");
+  const [error, setError] = React.useState("");
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  const sourceLocations = React.useMemo(
+    () => [...new Set(orders.map((order) => order.source_location).filter(Boolean))].sort(),
+    [orders]
+  );
+  const filteredOrders = sourceFilter === "All locations"
+    ? orders
+    : orders.filter((order) => order.source_location === sourceFilter);
+  const selectedOrders = filteredOrders.filter((order) => selectedOrderKeys.has(order.order_key));
+  const totalUnits = selectedOrders.reduce((sum, order) => sum + order.units, 0);
+
+  function selectSource(nextFilter: string, nextOrders = orders) {
+    setSourceFilter(nextFilter);
+    const matchingOrders = nextFilter === "All locations"
+      ? nextOrders
+      : nextOrders.filter((order) => order.source_location === nextFilter);
+    setSelectedOrderKeys(new Set(matchingOrders.map((order) => order.order_key)));
+  }
+
+  function suggestedSourceFilter(nextOrders: ImportedOrder[], nextAssignmentId: string) {
+    const machine = assignments.find((assignment) => assignment.id === nextAssignmentId)?.machine || "";
+    const machineNumber = machine.match(/\d+/)?.[0]?.padStart(2, "0");
+    if (!machineNumber) return "All locations";
+    return nextOrders.find((order) => order.source_location.match(/\d+$/)?.[0] === machineNumber)?.source_location
+      || "All locations";
+  }
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setError("");
+    setOrders([]);
+    try {
+      const parsed = await parseOrderFile(file);
+      setFileName(file.name);
+      setSourceType(parsed.sourceType);
+      setOrders(parsed.orders);
+      const suggested = suggestedSourceFilter(parsed.orders, assignmentId);
+      selectSource(suggested, parsed.orders);
+    } catch (parseError) {
+      setError(parseError instanceof Error ? parseError.message : "Could not read the file.");
+    }
+  }
+
+  async function importOrders() {
+    if (!supabase || !assignmentId || selectedOrders.length === 0) return;
+    setIsSaving(true);
+    setError("");
+    const { error: importError } = await supabase.rpc("import_machine_assignment_orders", {
+      p_assignment_id: assignmentId,
+      p_file_name: fileName,
+      p_source_type: sourceType,
+      p_import_mode: mode,
+      p_orders: selectedOrders,
+    });
+    if (importError) {
+      setError(importError.message);
+      setIsSaving(false);
+      return;
+    }
+    await onImported();
+    setIsSaving(false);
+    onClose();
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <header className="dialog-header">
+          <div>
+            <p className="eyebrow">Order import</p>
+            <h2 id="import-title">Assign orders to a machine</h2>
+          </div>
+          <button className="icon-action" type="button" onClick={onClose} title="Close import">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="import-controls">
+          <Field label="Machine">
+            <select
+              value={assignmentId}
+              onChange={(event) => {
+                setAssignmentId(event.target.value);
+                selectSource(suggestedSourceFilter(orders, event.target.value));
+              }}
+            >
+              {assignments.map((assignment) => (
+                <option key={assignment.id} value={assignment.id}>
+                  {assignment.machine} · {assignment.location}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Update method">
+            <select value={mode} onChange={(event) => setMode(event.target.value as "replace" | "merge")}>
+              <option value="replace">Replace active list</option>
+              <option value="merge">Merge with active list</option>
+            </select>
+          </Field>
+          {sourceLocations.length > 0 && (
+            <Field label="Source location">
+              <select value={sourceFilter} onChange={(event) => selectSource(event.target.value)}>
+                <option value="All locations">All locations</option>
+                {sourceLocations.map((location) => (
+                  <option key={location} value={location}>{location}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <label className="file-picker">
+            <FileSpreadsheet size={18} />
+            <span>{fileName || "Choose Excel or CSV"}</span>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv,.tsv"
+              onChange={(event) => void handleFile(event.target.files?.[0])}
+            />
+          </label>
+        </div>
+
+        {orders.length > 0 && (
+          <div className="import-preview">
+            <div className="preview-summary">
+              <span>{sourceType}</span>
+              <strong>{selectedOrders.length} of {filteredOrders.length} orders</strong>
+              <strong className={totalUnits > 360 ? "over-limit" : ""}>{totalUnits} units</strong>
+            </div>
+            <div className="preview-list">
+              {filteredOrders.slice(0, 100).map((order) => (
+                <label key={order.order_key}>
+                  <input
+                    type="checkbox"
+                    checked={selectedOrderKeys.has(order.order_key)}
+                    onChange={(event) => {
+                      const next = new Set(selectedOrderKeys);
+                      if (event.target.checked) next.add(order.order_key);
+                      else next.delete(order.order_key);
+                      setSelectedOrderKeys(next);
+                    }}
+                  />
+                  <span>{order.order_key}</span>
+                  <span>{order.customer_name || order.order_number || "No customer"}</span>
+                  <strong>{order.units}</strong>
+                </label>
+              ))}
+              {filteredOrders.length > 100 && <p>Showing the first 100 orders. Choose a source location to narrow the list.</p>}
+            </div>
+          </div>
+        )}
+
+        {error && <p className="access-error">{error}</p>}
+        {totalUnits > 360 && <p className="access-error">This list exceeds the 360-unit machine limit.</p>}
+
+        <footer className="dialog-actions">
+          <button className="secondary-action" type="button" onClick={onClose}>Cancel</button>
+          <button
+            className="primary-action"
+            disabled={isSaving || !assignmentId || selectedOrders.length === 0 || totalUnits > 360}
+            type="button"
+            onClick={() => void importOrders()}
+          >
+            {isSaving ? <Loader2 className="spin" size={18} /> : <Upload size={18} />}
+            <span>{isSaving ? "Importing" : "Import orders"}</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function Field({ children, label }: { children: React.ReactNode; label: string }) {
   return (
     <label className="field">
@@ -592,10 +803,12 @@ function Field({ children, label }: { children: React.ReactNode; label: string }
 function AssignmentRow({
   assignment,
   onDelete,
+  onOrdersChanged,
   onSave,
 }: {
   assignment: Assignment;
   onDelete: (id: string) => Promise<void>;
+  onOrdersChanged: () => Promise<void>;
   onSave: (id: string, draft: Draft) => Promise<boolean>;
 }) {
   const [draft, setDraft] = React.useState<Draft>({
@@ -608,6 +821,7 @@ function AssignmentRow({
   });
   const [isSaving, setIsSaving] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(false);
 
   React.useEffect(() => {
     setDraft({
@@ -631,6 +845,7 @@ function AssignmentRow({
   }
 
   return (
+    <>
     <tr>
       <td>
         <select
@@ -695,8 +910,121 @@ function AssignmentRow({
         <button className="icon-action danger" type="button" onClick={() => void onDelete(assignment.id)} title="Delete row">
           <Trash2 size={17} />
         </button>
+        <button className="icon-action" type="button" onClick={() => setExpanded(!expanded)} title="View imported orders">
+          {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+        </button>
       </td>
     </tr>
+    {expanded && (
+      <tr className="orders-detail-row">
+        <td colSpan={7}>
+          <MachineOrders assignmentId={assignment.id} onChanged={onOrdersChanged} />
+        </td>
+      </tr>
+    )}
+    </>
+  );
+}
+
+function MachineOrders({ assignmentId, onChanged }: { assignmentId: string; onChanged: () => Promise<void> }) {
+  const [orders, setOrders] = React.useState<MachineOrder[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
+
+  const loadOrders = React.useCallback(async () => {
+    if (!supabase) return;
+    setLoading(true);
+    const { data, error: loadError } = await supabase
+      .from("machine_assignment_orders")
+      .select("*")
+      .eq("assignment_id", assignmentId)
+      .neq("status", "removed")
+      .order("status", { ascending: false })
+      .order("order_key", { ascending: true });
+    if (loadError) setError(loadError.message);
+    else setOrders((data || []) as MachineOrder[]);
+    setLoading(false);
+  }, [assignmentId]);
+
+  React.useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
+
+  React.useEffect(() => {
+    if (!supabase) return undefined;
+    const channel = supabase
+      .channel(`machine-orders-${assignmentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "machine_assignment_orders",
+          filter: `assignment_id=eq.${assignmentId}`,
+        },
+        () => void loadOrders()
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [assignmentId, loadOrders]);
+
+  async function setStatus(order: MachineOrder) {
+    if (!supabase) return;
+    setError("");
+    const nextStatus = order.status === "completed" ? "pending" : "completed";
+    const { error: statusError } = await supabase.rpc("set_machine_assignment_order_status", {
+      p_order_id: order.id,
+      p_status: nextStatus,
+    });
+    if (statusError) {
+      setError(statusError.message);
+      return;
+    }
+    await Promise.all([loadOrders(), onChanged()]);
+  }
+
+  if (loading) return <div className="orders-empty"><Loader2 className="spin" size={18} /> Loading orders...</div>;
+  if (error) return <div className="orders-empty error-text">{error}</div>;
+  if (orders.length === 0) return <div className="orders-empty">No imported orders for this machine.</div>;
+
+  return (
+    <div className="machine-orders">
+      <div className="orders-heading">
+        <strong>Imported orders</strong>
+        <span>{orders.filter((order) => order.status === "pending").length} open</span>
+      </div>
+      <div className="order-list">
+        {orders.map((order) => (
+          <details className={`order-item ${order.status}`} key={order.id}>
+            <summary>
+              <span className="order-status">{order.status === "completed" ? <CheckCircle2 size={17} /> : <span />}</span>
+              <strong>{order.order_key}</strong>
+              <span>{order.customer_name || order.order_number || "Order"}</span>
+              <b>{order.units} units</b>
+              <button
+                className="order-status-action"
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void setStatus(order);
+                }}
+              >
+                {order.status === "completed" ? <RotateCcw size={16} /> : <Check size={16} />}
+                {order.status === "completed" ? "Reopen" : "Complete"}
+              </button>
+            </summary>
+            <div className="order-meta">
+              <span><small>Order</small>{order.order_number || "—"}</span>
+              <span><small>Category</small>{order.category || "—"}</span>
+              <span><small>Date</small>{order.due_date || "—"}</span>
+              <span><small>Source location</small>{order.source_location || "—"}</span>
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
   );
 }
 
