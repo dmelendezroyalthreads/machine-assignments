@@ -1,6 +1,6 @@
 # Machine Assignments
 
-Real-time assignment board for team leaders coordinating machine workload across two locations.
+Real-time assignment board for team leaders coordinating machine workload across three shifts.
 
 ## First version
 

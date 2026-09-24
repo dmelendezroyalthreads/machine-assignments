@@ -90,8 +90,8 @@ grant execute on function public.revoke_machine_assignment_access() to authentic
 
 create table if not exists public.machine_assignments (
   id uuid primary key default gen_random_uuid(),
-  location text not null default 'Location A'
-    check (location in ('Location A', 'Location B')),
+  location text not null default '1st Shift'
+    check (location in ('1st Shift', '2nd Shift', '3rd Shift')),
   machine text not null check (char_length(trim(machine)) between 1 and 40),
   category text not null
     check (category in ('P2S', 'Events', 'Rush/MST', 'FIFO', 'Special Project')),

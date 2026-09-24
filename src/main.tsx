@@ -5,7 +5,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from "@supaba
 import "./styles.css";
 
 const categories = ["P2S", "Events", "Rush/MST", "FIFO", "Special Project"] as const;
-const locations = ["Location A", "Location B"] as const;
+const locations = ["1st Shift", "2nd Shift", "3rd Shift"] as const;
 
 type Category = (typeof categories)[number];
 type LocationName = (typeof locations)[number];
@@ -25,7 +25,7 @@ type Assignment = {
 type Draft = Omit<Assignment, "id" | "created_at" | "updated_at">;
 
 const emptyDraft: Draft = {
-  location: "Location A",
+  location: "1st Shift",
   machine: "",
   category: "P2S",
   category_detail: "",
@@ -36,7 +36,7 @@ const emptyDraft: Draft = {
 const sampleAssignments: Assignment[] = [
   {
     id: "demo-1",
-    location: "Location A",
+    location: "1st Shift",
     machine: "Tajima 1",
     category: "Rush/MST",
     category_detail: "AM wave",
@@ -45,7 +45,7 @@ const sampleAssignments: Assignment[] = [
   },
   {
     id: "demo-2",
-    location: "Location A",
+    location: "2nd Shift",
     machine: "Barudan 2",
     category: "P2S",
     category_detail: "white polos",
@@ -54,7 +54,7 @@ const sampleAssignments: Assignment[] = [
   },
   {
     id: "demo-3",
-    location: "Location B",
+    location: "3rd Shift",
     machine: "Tajima 4",
     category: "Events",
     category_detail: "tournament",
@@ -361,7 +361,7 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
 
         <section className="entry-panel" aria-label="Add assignment">
           <form onSubmit={handleCreate} className="assignment-form">
-            <Field label="Location">
+            <Field label="Shift">
               <select
                 value={draft.location}
                 onChange={(event) => setDraft({ ...draft, location: event.target.value })}
@@ -442,7 +442,7 @@ function App({ onLock }: { onLock: () => Promise<void> }) {
           <table>
             <thead>
               <tr>
-                <th>Location</th>
+                <th>Shift</th>
                 <th>Machine</th>
                 <th>Category</th>
                 <th>Detail</th>
@@ -640,7 +640,7 @@ function AssignmentRow({
     <tr>
       <td>
         <select
-          aria-label="Location"
+          aria-label="Shift"
           value={draft.location}
           onChange={(event) => setDraft({ ...draft, location: event.target.value })}
         >
