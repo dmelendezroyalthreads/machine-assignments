@@ -165,17 +165,8 @@ function useAssignments() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "machine_assignments" },
-        (payload) => {
-          setAssignments((current) => {
-            if (payload.eventType === "DELETE") {
-              const oldRow = payload.old as Assignment;
-              return sortAssignments(current.filter((row) => row.id !== oldRow.id));
-            }
-
-            const nextRow = payload.new as Assignment;
-            const withoutExisting = current.filter((row) => row.id !== nextRow.id);
-            return sortAssignments([...withoutExisting, nextRow]);
-          });
+        () => {
+          void loadAssignments();
         }
       )
       .subscribe((state) => {
@@ -190,7 +181,7 @@ function useAssignments() {
         channel = null;
       }
     };
-  }, []);
+  }, [loadAssignments]);
 
   async function createAssignment(draft: Draft) {
     const issue = validateDraft(draft);
@@ -222,6 +213,7 @@ function useAssignments() {
       setError(insertError.message);
       return false;
     }
+    await loadAssignments();
     return true;
   }
 
@@ -252,6 +244,7 @@ function useAssignments() {
       setError(updateError.message);
       return false;
     }
+    await loadAssignments();
     return true;
   }
 
@@ -265,6 +258,7 @@ function useAssignments() {
     }
     const { error: deleteError } = await supabase.from("machine_assignments").delete().eq("id", id);
     if (deleteError) setError(deleteError.message);
+    else await loadAssignments();
   }
 
   return {
