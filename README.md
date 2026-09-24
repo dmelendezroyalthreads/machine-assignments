@@ -13,8 +13,11 @@ Real-time assignment board for team leaders coordinating machine workload across
   PMStats and LogistiView exports by their column headers, not their filenames.
 - Filter imported orders by source location, preview the detected pick tickets,
   and select the orders that belong on a machine before importing.
+- Target Durham machines 1 through 15 either by machine number or by the
+  LogistiView location in a full export.
 - Replace a machine's active list with a fresh file or merge additional orders
-  into its current list. Completed orders remain available in history.
+  into its current list. Replace always requires explicit confirmation, and
+  completed orders remain available in history.
 - Expand a machine row to review imported order details and mark individual
   orders complete or reopen them. The machine quantity is recalculated from its
   open imported orders.

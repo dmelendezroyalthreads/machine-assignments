@@ -612,40 +612,67 @@ function ImportOrdersDialog({
   onClose: () => void;
   onImported: () => Promise<void>;
 }) {
-  const [assignmentId, setAssignmentId] = React.useState(assignments[0]?.id || "");
+  const eligibleAssignments = assignments.filter((assignment) => {
+    const machineNumber = Number(assignment.machine.match(/\d+/)?.[0] || 0);
+    return machineNumber >= 1 && machineNumber <= 15;
+  });
+  const [assignmentId, setAssignmentId] = React.useState(eligibleAssignments[0]?.id || "");
   const [fileName, setFileName] = React.useState("");
   const [sourceType, setSourceType] = React.useState<ImportSourceType>("generic");
   const [orders, setOrders] = React.useState<ImportedOrder[]>([]);
-  const [sourceFilter, setSourceFilter] = React.useState("All locations");
+  const [sourceFilter, setSourceFilter] = React.useState("");
+  const [targetBy, setTargetBy] = React.useState<"machine" | "location">("machine");
   const [selectedOrderKeys, setSelectedOrderKeys] = React.useState<Set<string>>(new Set());
   const [mode, setMode] = React.useState<"replace" | "merge">("replace");
+  const [confirmingReplace, setConfirmingReplace] = React.useState(false);
   const [error, setError] = React.useState("");
   const [isSaving, setIsSaving] = React.useState(false);
 
-  const sourceLocations = React.useMemo(
-    () => [...new Set(orders.map((order) => order.source_location).filter(Boolean))].sort(),
+  const durhamLocations = React.useMemo(
+    () => [...new Set(orders
+      .map((order) => order.source_location)
+      .filter((location) => /^DUR(?:-|\b)/i.test(location)))].sort(),
     [orders]
   );
-  const filteredOrders = sourceFilter === "All locations"
-    ? orders
+  const selectedAssignment = assignments.find((assignment) => assignment.id === assignmentId);
+  const selectedMachineNumber = Number(selectedAssignment?.machine.match(/\d+/)?.[0] || 0);
+  const filteredOrders = targetBy === "machine"
+    ? orders.filter((order) => {
+        const locationNumber = Number(order.source_location.match(/(\d+)$/)?.[1] || 0);
+        return /^DUR(?:-|\b)/i.test(order.source_location) && locationNumber === selectedMachineNumber;
+      })
     : orders.filter((order) => order.source_location === sourceFilter);
   const selectedOrders = filteredOrders.filter((order) => selectedOrderKeys.has(order.order_key));
   const totalUnits = selectedOrders.reduce((sum, order) => sum + order.units, 0);
 
-  function selectSource(nextFilter: string, nextOrders = orders) {
+  function selectSource(nextFilter: string, nextOrders = orders, nextTargetBy = targetBy) {
     setSourceFilter(nextFilter);
-    const matchingOrders = nextFilter === "All locations"
-      ? nextOrders
+    const machineNumber = Number(assignments.find((assignment) => assignment.id === assignmentId)?.machine.match(/\d+/)?.[0] || 0);
+    const matchingOrders = nextTargetBy === "machine"
+      ? nextOrders.filter((order) => {
+          const locationNumber = Number(order.source_location.match(/(\d+)$/)?.[1] || 0);
+          return /^DUR(?:-|\b)/i.test(order.source_location) && locationNumber === machineNumber;
+        })
       : nextOrders.filter((order) => order.source_location === nextFilter);
     setSelectedOrderKeys(new Set(matchingOrders.map((order) => order.order_key)));
+    setConfirmingReplace(false);
   }
 
   function suggestedSourceFilter(nextOrders: ImportedOrder[], nextAssignmentId: string) {
     const machine = assignments.find((assignment) => assignment.id === nextAssignmentId)?.machine || "";
     const machineNumber = machine.match(/\d+/)?.[0]?.padStart(2, "0");
-    if (!machineNumber) return "All locations";
+    if (!machineNumber) return "";
     return nextOrders.find((order) => order.source_location.match(/\d+$/)?.[0] === machineNumber)?.source_location
-      || "All locations";
+      || "";
+  }
+
+  function selectLocation(nextLocation: string) {
+    const locationNumber = Number(nextLocation.match(/(\d+)$/)?.[1] || 0);
+    const matchingAssignment = eligibleAssignments.find((assignment) => (
+      Number(assignment.machine.match(/\d+/)?.[0] || 0) === locationNumber
+    ));
+    if (matchingAssignment) setAssignmentId(matchingAssignment.id);
+    selectSource(nextLocation);
   }
 
   async function handleFile(file: File | undefined) {
@@ -658,14 +685,18 @@ function ImportOrdersDialog({
       setSourceType(parsed.sourceType);
       setOrders(parsed.orders);
       const suggested = suggestedSourceFilter(parsed.orders, assignmentId);
-      selectSource(suggested, parsed.orders);
+      selectSource(suggested, parsed.orders, targetBy);
     } catch (parseError) {
       setError(parseError instanceof Error ? parseError.message : "Could not read the file.");
     }
   }
 
-  async function importOrders() {
+  async function importOrders(confirmedReplace = false) {
     if (!supabase || !assignmentId || selectedOrders.length === 0) return;
+    if (mode === "replace" && !confirmedReplace) {
+      setConfirmingReplace(true);
+      return;
+    }
     setIsSaving(true);
     setError("");
     const { error: importError } = await supabase.rpc("import_machine_assignment_orders", {
@@ -674,6 +705,7 @@ function ImportOrdersDialog({
       p_source_type: sourceType,
       p_import_mode: mode,
       p_orders: selectedOrders,
+      p_confirm_replace: confirmedReplace,
     });
     if (importError) {
       setError(importError.message);
@@ -704,10 +736,18 @@ function ImportOrdersDialog({
               value={assignmentId}
               onChange={(event) => {
                 setAssignmentId(event.target.value);
-                selectSource(suggestedSourceFilter(orders, event.target.value));
+                const nextMachine = Number(assignments.find((assignment) => assignment.id === event.target.value)?.machine.match(/\d+/)?.[0] || 0);
+                const matchingOrders = targetBy === "machine"
+                  ? orders.filter((order) => {
+                      const locationNumber = Number(order.source_location.match(/(\d+)$/)?.[1] || 0);
+                      return /^DUR(?:-|\b)/i.test(order.source_location) && locationNumber === nextMachine;
+                    })
+                  : orders.filter((order) => order.source_location === sourceFilter);
+                setSelectedOrderKeys(new Set(matchingOrders.map((order) => order.order_key)));
+                setConfirmingReplace(false);
               }}
             >
-              {assignments.map((assignment) => (
+              {eligibleAssignments.map((assignment) => (
                 <option key={assignment.id} value={assignment.id}>
                   {assignment.machine} · {assignment.location}
                 </option>
@@ -715,16 +755,35 @@ function ImportOrdersDialog({
             </select>
           </Field>
           <Field label="Update method">
-            <select value={mode} onChange={(event) => setMode(event.target.value as "replace" | "merge")}>
+            <select
+              value={mode}
+              onChange={(event) => {
+                setMode(event.target.value as "replace" | "merge");
+                setConfirmingReplace(false);
+              }}
+            >
               <option value="replace">Replace active list</option>
               <option value="merge">Merge with active list</option>
             </select>
           </Field>
-          {sourceLocations.length > 0 && (
-            <Field label="Source location">
-              <select value={sourceFilter} onChange={(event) => selectSource(event.target.value)}>
-                <option value="All locations">All locations</option>
-                {sourceLocations.map((location) => (
+          <Field label="Pull orders by">
+            <select
+              value={targetBy}
+              onChange={(event) => {
+                const nextTargetBy = event.target.value as "machine" | "location";
+                setTargetBy(nextTargetBy);
+                const nextLocation = sourceFilter || durhamLocations[0] || "";
+                selectSource(nextLocation, orders, nextTargetBy);
+              }}
+            >
+              <option value="machine">Machine 1-15</option>
+              <option value="location">LogistiView location</option>
+            </select>
+          </Field>
+          {targetBy === "location" && durhamLocations.length > 0 && (
+            <Field label="Durham location">
+              <select value={sourceFilter} onChange={(event) => selectLocation(event.target.value)}>
+                {durhamLocations.map((location) => (
                   <option key={location} value={location}>{location}</option>
                 ))}
               </select>
@@ -745,6 +804,7 @@ function ImportOrdersDialog({
           <div className="import-preview">
             <div className="preview-summary">
               <span>{sourceType}</span>
+              <span>{targetBy === "machine" ? `Durham machine ${selectedMachineNumber}` : sourceFilter}</span>
               <strong>{selectedOrders.length} of {filteredOrders.length} orders</strong>
               <strong className={totalUnits > 360 ? "over-limit" : ""}>{totalUnits} units</strong>
             </div>
@@ -773,6 +833,21 @@ function ImportOrdersDialog({
 
         {error && <p className="access-error">{error}</p>}
         {totalUnits > 360 && <p className="access-error">This list exceeds the 360-unit machine limit.</p>}
+        {orders.length > 0 && filteredOrders.length === 0 && (
+          <p className="access-error">No Durham orders matched this machine or location.</p>
+        )}
+
+        {confirmingReplace && (
+          <div className="replace-confirmation" role="alert">
+            <div>
+              <strong>Replace this machine's active orders?</strong>
+              <span>Orders not included in this import will be removed from the active list. Completed history will remain.</span>
+            </div>
+            <button className="danger-action" type="button" onClick={() => void importOrders(true)}>
+              Confirm replace
+            </button>
+          </div>
+        )}
 
         <footer className="dialog-actions">
           <button className="secondary-action" type="button" onClick={onClose}>Cancel</button>
@@ -780,7 +855,7 @@ function ImportOrdersDialog({
             className="primary-action"
             disabled={isSaving || !assignmentId || selectedOrders.length === 0 || totalUnits > 360}
             type="button"
-            onClick={() => void importOrders()}
+            onClick={() => void importOrders(false)}
           >
             {isSaving ? <Loader2 className="spin" size={18} /> : <Upload size={18} />}
             <span>{isSaving ? "Importing" : "Import orders"}</span>

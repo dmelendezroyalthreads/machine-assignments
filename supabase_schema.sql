@@ -226,12 +226,15 @@ revoke all on table public.machine_assignment_orders from anon;
 grant select, insert, update, delete on table public.machine_assignment_imports to authenticated;
 grant select, insert, update, delete on table public.machine_assignment_orders to authenticated;
 
+drop function if exists public.import_machine_assignment_orders(uuid, text, text, text, jsonb);
+
 create or replace function public.import_machine_assignment_orders(
   p_assignment_id uuid,
   p_file_name text,
   p_source_type text,
   p_import_mode text,
-  p_orders jsonb
+  p_orders jsonb,
+  p_confirm_replace boolean default false
 )
 returns jsonb
 language plpgsql
@@ -245,6 +248,9 @@ declare
 begin
   if p_import_mode not in ('replace', 'merge') then
     raise exception 'Import mode must be replace or merge.';
+  end if;
+  if p_import_mode = 'replace' and not p_confirm_replace then
+    raise exception 'Replacing active orders requires explicit confirmation.';
   end if;
   if p_source_type not in ('pmstats', 'logistiview', 'generic') then
     raise exception 'Unsupported source type.';
@@ -377,9 +383,9 @@ begin
 end;
 $$;
 
-revoke all on function public.import_machine_assignment_orders(uuid, text, text, text, jsonb) from public, anon;
+revoke all on function public.import_machine_assignment_orders(uuid, text, text, text, jsonb, boolean) from public, anon;
 revoke all on function public.set_machine_assignment_order_status(uuid, text) from public, anon;
-grant execute on function public.import_machine_assignment_orders(uuid, text, text, text, jsonb) to authenticated;
+grant execute on function public.import_machine_assignment_orders(uuid, text, text, text, jsonb, boolean) to authenticated;
 grant execute on function public.set_machine_assignment_order_status(uuid, text) to authenticated;
 
 do $$

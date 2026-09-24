@@ -485,6 +485,39 @@ td .units-input {
   padding: 0 18px 14px;
 }
 
+.replace-confirmation {
+  margin: 0 18px 16px;
+  padding: 14px;
+  border: 1px solid #e5a7a0;
+  background: #fff6f4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.replace-confirmation div {
+  display: grid;
+  gap: 4px;
+}
+
+.replace-confirmation span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.danger-action {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  background: var(--danger);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .orders-detail-row > td {
   padding: 0;
   background: #f4f8fa;
@@ -625,6 +658,11 @@ td .units-input {
 }
 
 @media (max-width: 680px) {
+  .replace-confirmation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
