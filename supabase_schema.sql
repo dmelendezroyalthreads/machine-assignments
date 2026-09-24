@@ -388,6 +388,65 @@ revoke all on function public.set_machine_assignment_order_status(uuid, text) fr
 grant execute on function public.import_machine_assignment_orders(uuid, text, text, text, jsonb, boolean) to authenticated;
 grant execute on function public.set_machine_assignment_order_status(uuid, text) to authenticated;
 
+create or replace function public.import_all_durham_machine_orders(
+  p_file_name text,
+  p_source_type text,
+  p_import_mode text,
+  p_machine_groups jsonb,
+  p_confirm_replace boolean default false
+)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $$
+declare
+  machine_group jsonb;
+  target_assignment_id uuid;
+  assignment_machine text;
+  import_result jsonb;
+  import_results jsonb := '[]'::jsonb;
+begin
+  if jsonb_typeof(p_machine_groups) <> 'array' or jsonb_array_length(p_machine_groups) = 0 then
+    raise exception 'No Durham machine groups were found in the file.';
+  end if;
+  if p_import_mode = 'replace' and not p_confirm_replace then
+    raise exception 'Replacing active orders requires explicit confirmation.';
+  end if;
+
+  for machine_group in select value from jsonb_array_elements(p_machine_groups)
+  loop
+    target_assignment_id := (machine_group ->> 'assignment_id')::uuid;
+
+    select machine into assignment_machine
+    from public.machine_assignments
+    where id = target_assignment_id;
+
+    if assignment_machine is null
+      or nullif(substring(assignment_machine from '\d+'), '')::integer not between 1 and 15 then
+      raise exception 'Every group must target an existing machine numbered 1 through 15.';
+    end if;
+
+    import_result := public.import_machine_assignment_orders(
+      target_assignment_id,
+      p_file_name,
+      p_source_type,
+      p_import_mode,
+      machine_group -> 'orders',
+      p_confirm_replace
+    );
+    import_results := import_results || jsonb_build_array(import_result);
+  end loop;
+
+  return jsonb_build_object(
+    'machine_count', jsonb_array_length(p_machine_groups),
+    'imports', import_results
+  );
+end;
+$$;
+
+revoke all on function public.import_all_durham_machine_orders(text, text, text, jsonb, boolean) from public, anon;
+grant execute on function public.import_all_durham_machine_orders(text, text, text, jsonb, boolean) to authenticated;
+
 do $$
 begin
   alter publication supabase_realtime add table public.machine_assignment_orders;

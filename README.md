@@ -15,6 +15,9 @@ Real-time assignment board for team leaders coordinating machine workload across
   and select the orders that belong on a machine before importing.
 - Target Durham machines 1 through 15 either by machine number or by the
   LogistiView location in a full export.
+- Update one machine or all matched Durham machines in a single import. An
+  all-machine import is transactional and enforces the 360-unit limit for each
+  machine separately.
 - Replace a machine's active list with a fresh file or merge additional orders
   into its current list. Replace always requires explicit confirmation, and
   completed orders remain available in history.

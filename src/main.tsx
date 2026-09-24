@@ -668,14 +668,29 @@ function ImportOrdersDialog({
   );
   const selectedAssignment = assignments.find((assignment) => assignment.id === assignmentId);
   const selectedMachineNumber = Number(selectedAssignment?.machine.match(/\d+/)?.[0] || 0);
+  const isAllMachines = assignmentId === "all";
+  const eligibleMachineNumbers = new Set(eligibleAssignments.map((assignment) => (
+    Number(assignment.machine.match(/\d+/)?.[0] || 0)
+  )));
   const filteredOrders = targetBy === "machine"
     ? orders.filter((order) => {
         const locationNumber = Number(order.source_location.match(/(\d+)$/)?.[1] || 0);
-        return /^DUR(?:-|\b)/i.test(order.source_location) && locationNumber === selectedMachineNumber;
+        return /^DUR(?:-|\b)/i.test(order.source_location)
+          && (isAllMachines ? eligibleMachineNumbers.has(locationNumber) : locationNumber === selectedMachineNumber);
       })
     : orders.filter((order) => order.source_location === sourceFilter);
   const selectedOrders = filteredOrders.filter((order) => selectedOrderKeys.has(order.order_key));
   const totalUnits = selectedOrders.reduce((sum, order) => sum + order.units, 0);
+  const ordersByAssignment = eligibleAssignments.map((assignment) => {
+    const machineNumber = Number(assignment.machine.match(/\d+/)?.[0] || 0);
+    const machineOrders = selectedOrders.filter((order) => (
+      Number(order.source_location.match(/(\d+)$/)?.[1] || 0) === machineNumber
+    ));
+    return { assignment, orders: machineOrders };
+  }).filter((group) => group.orders.length > 0);
+  const overLimitMachines = ordersByAssignment.filter((group) => (
+    group.orders.reduce((sum, order) => sum + order.units, 0) > 360
+  ));
 
   function selectSource(nextFilter: string, nextOrders = orders, nextTargetBy = targetBy) {
     setSourceFilter(nextFilter);
@@ -683,7 +698,8 @@ function ImportOrdersDialog({
     const matchingOrders = nextTargetBy === "machine"
       ? nextOrders.filter((order) => {
           const locationNumber = Number(order.source_location.match(/(\d+)$/)?.[1] || 0);
-          return /^DUR(?:-|\b)/i.test(order.source_location) && locationNumber === machineNumber;
+          return /^DUR(?:-|\b)/i.test(order.source_location)
+            && (assignmentId === "all" ? eligibleMachineNumbers.has(locationNumber) : locationNumber === machineNumber);
         })
       : nextOrders.filter((order) => order.source_location === nextFilter);
     setSelectedOrderKeys(new Set(matchingOrders.map((order) => order.order_key)));
@@ -731,14 +747,26 @@ function ImportOrdersDialog({
     }
     setIsSaving(true);
     setError("");
-    const { error: importError } = await supabase.rpc("import_machine_assignment_orders", {
-      p_assignment_id: assignmentId,
-      p_file_name: fileName,
-      p_source_type: sourceType,
-      p_import_mode: mode,
-      p_orders: selectedOrders,
-      p_confirm_replace: confirmedReplace,
-    });
+    const request = isAllMachines
+      ? supabase.rpc("import_all_durham_machine_orders", {
+          p_file_name: fileName,
+          p_source_type: sourceType,
+          p_import_mode: mode,
+          p_machine_groups: ordersByAssignment.map((group) => ({
+            assignment_id: group.assignment.id,
+            orders: group.orders,
+          })),
+          p_confirm_replace: confirmedReplace,
+        })
+      : supabase.rpc("import_machine_assignment_orders", {
+          p_assignment_id: assignmentId,
+          p_file_name: fileName,
+          p_source_type: sourceType,
+          p_import_mode: mode,
+          p_orders: selectedOrders,
+          p_confirm_replace: confirmedReplace,
+        });
+    const { error: importError } = await request;
     if (importError) {
       setError(importError.message);
       setIsSaving(false);
@@ -767,18 +795,22 @@ function ImportOrdersDialog({
             <select
               value={assignmentId}
               onChange={(event) => {
-                setAssignmentId(event.target.value);
-                const nextMachine = Number(assignments.find((assignment) => assignment.id === event.target.value)?.machine.match(/\d+/)?.[0] || 0);
-                const matchingOrders = targetBy === "machine"
+                const nextAssignmentId = event.target.value;
+                setAssignmentId(nextAssignmentId);
+                const nextMachine = Number(assignments.find((assignment) => assignment.id === nextAssignmentId)?.machine.match(/\d+/)?.[0] || 0);
+                if (nextAssignmentId === "all") setTargetBy("machine");
+                const matchingOrders = nextAssignmentId === "all" || targetBy === "machine"
                   ? orders.filter((order) => {
                       const locationNumber = Number(order.source_location.match(/(\d+)$/)?.[1] || 0);
-                      return /^DUR(?:-|\b)/i.test(order.source_location) && locationNumber === nextMachine;
+                      return /^DUR(?:-|\b)/i.test(order.source_location)
+                        && (nextAssignmentId === "all" ? eligibleMachineNumbers.has(locationNumber) : locationNumber === nextMachine);
                     })
                   : orders.filter((order) => order.source_location === sourceFilter);
                 setSelectedOrderKeys(new Set(matchingOrders.map((order) => order.order_key)));
                 setConfirmingReplace(false);
               }}
             >
+              <option value="all">All Durham machines 1-15</option>
               {eligibleAssignments.map((assignment) => (
                 <option key={assignment.id} value={assignment.id}>
                   {assignment.machine} · {assignment.location}
@@ -809,7 +841,7 @@ function ImportOrdersDialog({
               }}
             >
               <option value="machine">Machine 1-15</option>
-              <option value="location">LogistiView location</option>
+              <option value="location" disabled={isAllMachines}>LogistiView location</option>
             </select>
           </Field>
           {targetBy === "location" && durhamLocations.length > 0 && (
@@ -836,9 +868,13 @@ function ImportOrdersDialog({
           <div className="import-preview">
             <div className="preview-summary">
               <span>{sourceType}</span>
-              <span>{targetBy === "machine" ? `Durham machine ${selectedMachineNumber}` : sourceFilter}</span>
+              <span>
+                {targetBy === "machine"
+                  ? (isAllMachines ? `${ordersByAssignment.length} Durham machines` : `Durham machine ${selectedMachineNumber}`)
+                  : sourceFilter}
+              </span>
               <strong>{selectedOrders.length} of {filteredOrders.length} orders</strong>
-              <strong className={totalUnits > 360 ? "over-limit" : ""}>{totalUnits} units</strong>
+              <strong className={overLimitMachines.length > 0 ? "over-limit" : ""}>{totalUnits} units</strong>
             </div>
             <div className="preview-list">
               {filteredOrders.slice(0, 100).map((order) => (
@@ -864,7 +900,12 @@ function ImportOrdersDialog({
         )}
 
         {error && <p className="access-error">{error}</p>}
-        {totalUnits > 360 && <p className="access-error">This list exceeds the 360-unit machine limit.</p>}
+        {!isAllMachines && totalUnits > 360 && <p className="access-error">This list exceeds the 360-unit machine limit.</p>}
+        {isAllMachines && overLimitMachines.length > 0 && (
+          <p className="access-error">
+            Over 360 units: {overLimitMachines.map((group) => group.assignment.machine).join(", ")}.
+          </p>
+        )}
         {orders.length > 0 && filteredOrders.length === 0 && (
           <p className="access-error">No Durham orders matched this machine or location.</p>
         )}
@@ -872,8 +913,8 @@ function ImportOrdersDialog({
         {confirmingReplace && (
           <div className="replace-confirmation" role="alert">
             <div>
-              <strong>Replace this machine's active orders?</strong>
-              <span>Orders not included in this import will be removed from the active list. Completed history will remain.</span>
+              <strong>Replace {isAllMachines ? "all matched machines'" : "this machine's"} active orders?</strong>
+              <span>Orders not included in this import will be removed from the affected active lists. Completed history will remain.</span>
             </div>
             <button className="danger-action" type="button" onClick={() => void importOrders(true)}>
               Confirm replace
@@ -885,7 +926,7 @@ function ImportOrdersDialog({
           <button className="secondary-action" type="button" onClick={onClose}>Cancel</button>
           <button
             className="primary-action"
-            disabled={isSaving || !assignmentId || selectedOrders.length === 0 || totalUnits > 360}
+            disabled={isSaving || !assignmentId || selectedOrders.length === 0 || (!isAllMachines && totalUnits > 360) || overLimitMachines.length > 0}
             type="button"
             onClick={() => void importOrders(false)}
           >
